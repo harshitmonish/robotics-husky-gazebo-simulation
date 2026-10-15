@@ -1,29 +1,52 @@
-# Husky Gazebo Simulation Setup
+# Husky Path Planning and Gazebo Control
 
-This project contains a ROS 1 package scaffold for starting a Husky Gazebo playpen simulation. The launch file includes the Husky Gazebo playpen and robot spawn launch files, while `map.txt` contains a grid-like map artifact.
+This ROS 1 catkin package contains a grid-based path planner and a Husky motion controller. The planner finds a route through a hard-coded occupancy grid with A*, displays and saves a map plot, and follows the route by publishing velocity commands based on odometry.
 
-## Contents
+## Repository structure
 
-- `package.xml` and `CMakeLists.txt`: catkin package metadata/build configuration.
-- `launch/lab5.launch`: includes `husky_gazebo` playpen and Husky spawn launches.
-- `map.txt`: map data.
-- `Assignment-5.pdf`: original coursework handout.
+```text
+src/
+├── CMakeLists.txt       # Catkin build configuration
+├── package.xml          # ROS package metadata and dependencies
+├── map.txt              # 42 × 42 occupancy-grid data
+└── plan/
+    └── planning.py     # A* planner, visualization, and Husky controller
+```
 
-The package archive and extracted package do not contain node implementation files: `src/`, `scripts/`, and `msgs/` are empty. As a result, the assignment behavior cannot be inferred or run from the available code alone.
+The planner currently defines its own copy of the occupancy grid in `planning.py`; it does not load `map.txt` at runtime. In the grid, `1` marks an obstacle and `0` marks traversable space. A* searches the four neighboring cells, and helper functions convert between grid indices and world coordinates.
 
-## Requirements and launch
+## Runtime behavior
 
-The launch file requires ROS 1, Gazebo, and the `husky_gazebo` package with its `playpen.launch` and `spawn_husky.launch` files. To open the simulation after placing this repository, with `package.xml` at its root, in a catkin workspace:
+The node:
+
+1. Reads the goal coordinates from ROS parameters and obtains the robot's initial position from `/gazebo/link_states`.
+2. Computes a path across the 42 × 42 grid.
+3. Prints the grid and world-coordinate path, saves a visualization as `map_plot.png`, and opens it in an OpenCV window.
+4. Tracks the route using `/husky_velocity_controller/odom` and publishes `geometry_msgs/Twist` commands to `/husky_velocity_controller/cmd_vel`.
+
+There is no launch file in the repository, so Gazebo, the Husky model, the goal parameters, and any required ROS configuration must be started or supplied separately. The planner expects a Gazebo link named `husky::base_link` and a ROS environment that provides the topics and messages listed above.
+
+## Requirements
+
+- ROS 1 with `rospy`, `geometry_msgs`, `nav_msgs`, `gazebo_msgs`, `sensor_msgs`, `visualization_msgs`, and `cv_bridge`.
+- A running Gazebo Husky simulation publishing link states and Husky odometry.
+- Python dependencies: NumPy, Matplotlib, and OpenCV (`cv2`), in addition to ROS Python packages and `tf`.
+- A graphical display for the OpenCV window created by the planner.
+
+The package metadata and CMake configuration are in `src/`. Build from a catkin workspace that contains this package directory:
 
 ```bash
 cd ~/catkin_ws
 catkin_make
 source devel/setup.bash
-roslaunch lab5 lab5.launch
 ```
 
-This starts the simulation only; no assignment node is launched by this file. Add the missing implementation and any runtime dependencies before describing this as a complete project.
+The Python script is not currently registered as an installed catkin executable. Once the ROS master, simulator, and required goal parameters are available, it can be run from the repository root with:
 
-## Academic use
+```bash
+python3 src/plan/planning.py
+```
 
-Check course rules and the handout's redistribution terms before making the coursework files public.
+## Notes
+
+The displayed/saved map comes from the grid embedded in the Python file, so editing `map.txt` alone does not change the route. The plotting code writes `map_plot.png` to the current working directory. The controller uses a simple waypoint-following loop; tune and validate it in simulation before using it with a physical robot.
