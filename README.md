@@ -26,6 +26,43 @@ The node:
 
 There is no launch file in the repository, so Gazebo, the Husky model, the goal parameters, and any required ROS configuration must be started or supplied separately. The planner expects a Gazebo link named `husky::base_link` and a ROS environment that provides the topics and messages listed above.
 
+## Implementation summary
+
+The implementation has a planning stage followed by a waypoint-following stage:
+
+1. **Get start and goal.** The node reads `/lab5/goal_x` and `/lab5/goal_y` as world coordinates. It waits for `/gazebo/link_states`, finds `husky::base_link`, and rounds its first reported x/y position to the nearest whole world unit for the start.
+2. **Convert coordinates.** `world_to_grid` maps world coordinates onto the 42 × 42 array, and `is_safe` allows only in-bounds cells whose value is `0`. Values of `1` are obstacles.
+3. **Plan with A*.** `a_star_func` searches the four cardinal neighbors. Each move costs one cell, and the priority is the accumulated cost plus Euclidean distance to the goal. Parent links are recorded so the route can be reconstructed. If no route is found, the node reports an error and stops.
+4. **Visualize and convert the route.** The route is printed in grid and world coordinates, plotted over the occupancy grid, saved to `map_plot.png`, and displayed in an OpenCV window. Grid waypoints are converted back to world coordinates for motion control.
+5. **Follow waypoints.** The node reads `/husky_velocity_controller/odom` and publishes `Twist` messages to `/husky_velocity_controller/cmd_vel`. It targets waypoints from the start end of the reconstructed route, advances when the robot is within 0.30 world units, and commands 0.5 forward speed when the heading error is under 0.02 radians. Otherwise it commands angular velocity equal to the heading error. It exits after selecting the destination waypoint.
+
+```mermaid
+flowchart TD
+    A[Start ROS node] --> B[Read goal world coordinates<br/>/lab5/goal_x and /lab5/goal_y]
+    A --> C[Wait for first Husky pose<br/>/gazebo/link_states]
+    B --> D[Convert start and goal<br/>world coordinates to grid cells]
+    C --> D
+    D --> E{Cells valid and route exists?}
+    E -- No --> F[Report invalid input<br/>or no path and stop]
+    E -- Yes --> G[A* on embedded 42 x 42 grid<br/>four-neighbor moves]
+    G --> H[Reconstruct path and plot it<br/>save map_plot.png]
+    H --> I[Convert grid path to<br/>world-coordinate waypoints]
+    I --> J[Read odometry<br/>/husky_velocity_controller/odom]
+    J --> K[Choose next waypoint<br/>and compute distance and heading error]
+    K --> L{Within waypoint tolerance?}
+    L -- Yes --> M[Advance waypoint]
+    L -- No --> N{Heading error < 0.02 rad?}
+    N -- Yes --> O[Publish 0.5 forward speed]
+    N -- No --> P[Publish angular speed<br/>equal to heading error]
+    M --> Q{Destination selected?}
+    O --> J
+    P --> J
+    Q -- No --> J
+    Q -- Yes --> R[Exit]
+```
+
+The occupancy grid is currently duplicated in `planning.py`; `map.txt` is not loaded at runtime. The path cost and heuristic are defined in grid-cell units, while the waypoint-following tolerances and velocity commands operate in world coordinates and ROS units.
+
 ## Requirements
 
 - ROS 1 with `rospy`, `geometry_msgs`, `nav_msgs`, `gazebo_msgs`, `sensor_msgs`, `visualization_msgs`, and `cv_bridge`.
